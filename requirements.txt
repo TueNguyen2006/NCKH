@@ -1,9 +1,10 @@
 opencv-python==4.10.0.84
 mediapipe==0.10.14
-protobuf==4.24.4
+protobuf==4.25.3
 imutils==0.5.4
 scikit-image==0.24.0
 psutil==6.1.0
 scikit-learn==1.5.2
 joblib==1.4.2
 pyserial==3.5
+RPi.GPIO==0.7.1
