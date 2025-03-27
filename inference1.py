@@ -427,7 +427,7 @@ def infer(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred_norm, yaw_pred_
                     count_decision = 0 # Reset count_decision if predict no drownsiness
                 else:
                     count_decision += 1
-                print(count_decision)
+                print(f"Count decision: {count_decision}")
 
             cv2.putText(image, "EAR: %.2f" %(ear_main), (int(0.02*width), int(0.07*height)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
@@ -457,7 +457,7 @@ def infer(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred_norm, yaw_pred_
                             cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 3)
             
             if count_decision >= count_detect_drownsiness or (head == 1 and head_count >=20): # Turn Alert
-                print("CẢNH BÁO BUỒN NGỦ")
+                print("Drowsiness detected! Activating alert.")
                 # ras_obj.warning()
             else:
                 # ras_obj.turn_off()
@@ -472,6 +472,8 @@ def infer(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred_norm, yaw_pred_
 
         if processed_frames % 100 == 0:
             gc.collect()
+            processed_frames = 0
+
         if cv2.waitKey(5) & 0xFF == ord("q"):
             running = False
     running = False
@@ -524,14 +526,14 @@ if __name__ == "__main__":
         infer(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred, yaw_pred, roll_pred)
     
     except KeyboardInterrupt:
-        print("Chương trình được dừng bằng KeyboardInterrupt.")
+        print("Program interrupted by user.")
     
     except Exception as e:
-        print("Đã xảy ra lỗi:", e)
+        print("An error occurred:", e)
     
     finally:
         # Gọi dọn dẹp tài nguyên:
-        print("Đang dọn dẹp tài nguyên phần cứng...")
+        print("Cleaning up hardware resources...")
         # ras_obj.close()
         cv2.destroyAllWindows()
-        print("Kết thúc chương trình.")
+        print("Program terminated.")
