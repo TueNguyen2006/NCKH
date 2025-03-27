@@ -3,133 +3,14 @@ import mediapipe as mp
 import math
 import numpy as np 
 import os 
-import time
 import torch
 import psutil
-import threading
-import serial
 import pickle
 import warnings
-import joblib
-import RPi.GPIO as GPIO
+import gc
+# from ras import Ras
 
 
-def Serial_UART(serial_port="/dev/serial0", baudrate=9600):
-    while True:
-        try:
-            ser = serial.Serial(
-                port=serial_port,  # UART trên Raspberry Pi
-                baudrate=baudrate,
-                timeout=1
-            )
-            break
-            
-        except serial.SerialException as Exc:
-            print("Lỗi mở Serial: ",Exc)
-            time.sleep(1)
-    print("Đã kết nối Serial")
-    return ser
-
-class Ras:
-    def __init__(self, serial_port="/dev/serial0", baudrate=9600, vibration_motor=17):
-        """Khởi tạo Raspberry Pi với module âm thanh và motor rung"""
-        self.serial_port = serial_port
-        self.baudrate = baudrate
-        self.ser = None  # Chưa kết nối ngay
-        self.serial_ready = threading.Event()  # Quản lý trạng thái Serial
-        
-        self.vibration_motor = vibration_motor
-        self.running_event = threading.Event()  # Quản lý trạng thái chạy nhạc + motor
-        
-        # Cấu hình GPIO
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.vibration_motor, GPIO.OUT)
-
-        # Chạy luồng kết nối Serial
-        self.serial_thread = threading.Thread(target=self.Serial_UART, daemon=True)
-        self.serial_thread.start()
-
-        # Khởi tạo luồng chỉ 1 lần
-        self.music_thread = threading.Thread(target=self.play_music, daemon=True)
-        self.motor_thread = threading.Thread(target=self.vibrate_motor, daemon=True)
-
-        self.music_thread.start()
-        self.motor_thread.start()
-
-    def Serial_UART(self):
-        """Kết nối Serial trên luồng riêng, không làm gián đoạn chương trình chính"""
-        while True:
-            try:
-                self.ser = serial.Serial(port=self.serial_port, baudrate=self.baudrate, timeout=1)
-                print("Đã kết nối Serial!")
-                self.serial_ready.set()  # Đánh dấu serial đã sẵn sàng
-                break  # Dừng vòng lặp nếu kết nối thành công
-            except serial.SerialException as e:
-                print("Lỗi mở Serial:", e)
-                time.sleep(1)  # Chờ 1 giây rồi thử lại
-
-    def get_serial(self):
-        """Đợi đến khi Serial sẵn sàng trước khi sử dụng"""
-        self.serial_ready.wait()  # Đợi cho đến khi serial kết nối thành công
-        return self.ser
-
-    def send_command(self, command):
-        """Gửi lệnh đến module nhạc"""
-        ser = self.get_serial()
-        ser.write(command)
-
-    def play_song(self, song_number):
-        """Phát bài nhạc theo số thứ tự"""
-        command = bytes([0x7E, 0xFF, 0x06, 0x03, 0x00, 0x00, song_number, 0xEF])
-        self.send_command(command)
-
-    def set_volume(self, volume_level):
-        """Đặt âm lượng (0-30)"""
-        command = bytes([0x7E, 0xFF, 0x06, 0x06, 0x00, 0x00, volume_level, 0xEF])
-        self.send_command(command)
-
-    def play_music(self, volume_level=30, song_number=1):
-        """Chạy nhạc trong vòng lặp, chờ sự kiện bật/tắt"""
-        while True:
-            self.running_event.wait()  # Chờ bật
-            print("Phát nhạc...")
-            self.set_volume(volume_level)
-            self.play_song(song_number)
-            time.sleep(2)  # Chờ 2 giây trước khi phát tiếp
-
-    def vibrate_motor(self, duration=1):
-        """Rung motor trong vòng lặp, chờ sự kiện bật/tắt"""
-        while True:
-            self.running_event.wait()  # Chờ bật
-            print("Bật motor rung...")
-            GPIO.output(self.vibration_motor, GPIO.HIGH)
-            time.sleep(duration)
-            GPIO.output(self.vibration_motor, GPIO.LOW)
-            time.sleep(0.5)  # Nghỉ 0.5s trước khi rung tiếp
-
-    def warning(self):
-        """Bật cảnh báo (nhạc + rung)"""
-        if self.running_event.is_set():
-            print("Cảnh báo đang chạy!")
-            return
-        print("Bắt đầu cảnh báo...")
-        self.running_event.set()  # Bật nhạc và rung (vòng lặp tự chạy)
-
-    def turn_off(self):
-        """Dừng nhạc và rung"""
-        if not self.running_event.is_set():
-            print("Cảnh báo chưa chạy, không cần dừng!")
-            return
-        print("Dừng cảnh báo...")
-        self.running_event.clear()  # Dừng vòng lặp trong các luồng
-
-    def close(self):
-        """Dọn dẹp kết nối"""
-        self.turn_off()
-        if self.ser:
-            self.ser.close()
-        GPIO.cleanup()
-        print("Đã đóng kết nối và dọn dẹp GPIO.")
 
 def get_memory_usage():
     process = psutil.Process(os.getpid())  
@@ -312,7 +193,7 @@ def run_face_mp(image, height, width, draw_face = True):
         moe = -1000
         pitch_pred, yaw_pred, roll_pred = 0, 0, 0
         detect = False
-   
+    results = None
     return ear, mar, puc, moe, pitch_pred, yaw_pred, roll_pred, image
 
 
@@ -445,7 +326,7 @@ def get_classification(input_data):
 #     return 1 if sum(predictions) > 5 else 0
 
 
-def infer(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred_norm, yaw_pred_norm, roll_pred_norm, count_detect_drownsiness = 6):
+def infer(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred_norm, yaw_pred_norm, roll_pred_norm, count_detect_drownsiness = 6, ras_obj=None):
     ''' Perform inference.
     :param ears_norm: Normalization values for eye feature
     :param mars_norm: Normalization values for mouth feature
@@ -467,6 +348,7 @@ def infer(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred_norm, yaw_pred_
     decay = 0.9 # use decay to smoothen the noise in feature values
 
     label = None
+    processed_frames = 0
 
     input_data = []
     frame_before_run = 0
@@ -486,6 +368,7 @@ def infer(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred_norm, yaw_pred_
         if not success:
             print("Ignoring empty camera frame.")
             continue
+        processed_frames += 1
         ear, mar, puc, moe, pitch_pred, yaw_pred, roll_pred, image = run_face_mp(image, height=height, width=width)
 
         if running_inference: # Nếu xe đang chạy, chạy inference và ngược lại
@@ -504,7 +387,7 @@ def infer(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred_norm, yaw_pred_
                     puc_main = puc
                     moe_main = moe
                 else:
-                    ear_main = ear_main*decay + (1-decay)*ear
+                    ear_main = ear_main*decay + (1-decay)*ear #EMA data smoothing
                     mar_main = mar_main*decay + (1-decay)*mar
                     puc_main = puc_main*decay + (1-decay)*puc
                     moe_main = moe_main*decay + (1-decay)*moe
@@ -528,16 +411,15 @@ def infer(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred_norm, yaw_pred_
                     head_count += 1
                     head = 1
                 else:
-                    head_count == 0
+                    head_count = 0
                 
-
             if len(input_data) == 20:
                 input_data.pop(0)
             input_data.append([ear_main, mar_main, puc_main, moe_main])
 
             frame_before_run += 1
 
-            if frame_before_run >= 35 and len(input_data) == 20:
+            if frame_before_run >= 15 and len(input_data) == 20:
                 frame_before_run = 0
                 label = get_classification(input_data) # 1 is drowsiness, 0 is normal
                 # print ('got label ', label)
@@ -576,64 +458,80 @@ def infer(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred_norm, yaw_pred_
             
             if count_decision >= count_detect_drownsiness or (head == 1 and head_count >=20): # Turn Alert
                 print("CẢNH BÁO BUỒN NGỦ")
-                ras.warning()
+                # ras_obj.warning()
             else:
-                ras.turn_off()
-            
+                # ras_obj.turn_off()
+                pass
         else:
             image.fill(0)
             count_decision = 0
             head_count = 0
             alert = False
         cv2.imshow('MediaPipe FaceMesh', image)
-        out.write(image)
+        # out.write(image)
+
+        if processed_frames % 100 == 0:
+            gc.collect()
         if cv2.waitKey(5) & 0xFF == ord("q"):
             running = False
     running = False
     alert = False
     cv2.destroyAllWindows()
     cap.release()
-    out.release()
+    # out.release()
 
 
 if __name__ == "__main__":
-    warnings.filterwarnings("ignore", category=UserWarning)
+    try:
+        warnings.filterwarnings("ignore", category=UserWarning)
 
-    right_eye = [[33, 133], [160, 144], [159, 145], [158, 153]] # right eye landmark positions
-    left_eye = [[263, 362], [387, 373], [386, 374], [385, 380]] # left eye landmark positions
-    mouth = [[61, 291], [39, 181], [0, 17], [269, 405]] # mouth landmark coordinates
-    states = ['normal', 'drowsy']
+        right_eye = [[33, 133], [160, 144], [159, 145], [158, 153]]
+        left_eye = [[263, 362], [387, 373], [386, 374], [385, 380]]
+        mouth = [[61, 291], [39, 181], [0, 17], [269, 405]]
+        states = ['normal', 'drowsy']
 
-    running = True  
-    running_inference = True
-    alert = False
-    stop_thread = False
+        # ras_obj = Ras(serial_port="/dev/serial0", baudrate=9600, vibration_motor=17)
 
-    servo_delta_x = 0
-    servo_delta_y = 0
-    current_servo_x = 90
-    current_servo_y = 90
+        running = True  
+        running_inference = True
+        alert = False
+        stop_thread = False
 
-    ras = Ras(serial_port="/dev/serial0", baud_rate=9600, vibration_motor=17)
+        servo_delta_x = 0
+        servo_delta_y = 0
+        current_servo_x = 90
+        current_servo_y = 90
 
 
-    # Declaring FaceMesh model
-    mp_face_mesh = mp.solutions.face_mesh
-    face_mesh = mp_face_mesh.FaceMesh(
-        min_detection_confidence=0.3, min_tracking_confidence=0.8)
-    mp_drawing = mp.solutions.drawing_utils 
-    drawing_spec = mp_drawing.DrawingSpec(thickness=1, circle_radius=1)
+        # Khởi tạo FaceMesh
+        mp_face_mesh = mp.solutions.face_mesh
+        face_mesh = mp_face_mesh.FaceMesh(
+            min_detection_confidence=0.3,
+            min_tracking_confidence=0.8,
+            max_num_faces=1)
+        mp_drawing = mp.solutions.drawing_utils 
+        drawing_spec = mp_drawing.DrawingSpec(thickness=1, circle_radius=1)
 
-    model_head_pose = pickle.load(open('./models/model.pkl', 'rb'))
+        model_head_pose = pickle.load(open('./models/model.pkl', 'rb'))
+        model_lstm_path = './models/clf_lstm.pth'
+        model = torch.jit.load(model_lstm_path)
+        model.eval()
 
-    model_lstm_path = './models/clf_lstm.pth'
-    model = torch.jit.load(model_lstm_path)
-    model.eval()
-
-    # cnn, svm, scaler = load_models()
-
-    print('Starting calibration. Please be in neutral state')
-    ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred, yaw_pred, roll_pred = calibrate()
-    print(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred, yaw_pred, roll_pred)
-    print('Starting main application')
-    infer(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred, yaw_pred, roll_pred)
+        print('Starting calibration. Please be in neutral state')
+        ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred, yaw_pred, roll_pred = calibrate()
+        print(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred, yaw_pred, roll_pred)
+        print('Starting main application')
+        infer(ears_norm, mars_norm, pucs_norm, moes_norm, pitch_pred, yaw_pred, roll_pred)
+    
+    except KeyboardInterrupt:
+        print("Chương trình được dừng bằng KeyboardInterrupt.")
+    
+    except Exception as e:
+        print("Đã xảy ra lỗi:", e)
+    
+    finally:
+        # Gọi dọn dẹp tài nguyên:
+        print("Đang dọn dẹp tài nguyên phần cứng...")
+        # ras_obj.close()
+        cv2.destroyAllWindows()
+        print("Kết thúc chương trình.")
