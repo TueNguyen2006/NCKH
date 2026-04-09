@@ -4,7 +4,7 @@ Sao chép toàn bộ đoạn mã dưới đây và dán vào Terminal để tự
 
 ```bash
 # 1. Clone repo và truy cập thư mục
-git clone [https://github.com/TueNguyen2006/NCKH.git](https://github.com/TueNguyen2006/NCKH.git) && cd NCKH
+git clone https://github.com/TueNguyen2006/NCKH.git && cd NCKH
 
 # 2. Khởi tạo và kích hoạt môi trường ảo (venv)
 python -m venv venv
