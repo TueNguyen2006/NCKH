@@ -8,3 +8,6 @@ scikit-learn
 joblib
 pyserial
 RPi.GPIO
+torch
+torchvision
+torchaudio
